@@ -114,7 +114,7 @@ async def chat(
         async with httpx.AsyncClient(timeout=90) as client:
             response = await client.post(
                 url,
-                params={"key": GEMINI_API_KEY},
+                headers={"x-goog-api-key": GEMINI_API_KEY},
                 json={
                     "contents": contents,
                     "generationConfig": {
