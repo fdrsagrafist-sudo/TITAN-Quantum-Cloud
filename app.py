@@ -2,20 +2,22 @@ import os
 import hmac
 import httpx
 
-from fastapi import FastAPI, Header, HTTPException, Depends
+from fastapi import FastAPI, HTTPException, Depends
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
+
 
 app = FastAPI(
     title="TITAN Ω Cloud API",
     version="0.2.0"
 )
 
+
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3-flash-preview")
 TITAN_API_TOKEN = os.getenv("TITAN_API_TOKEN", "")
 
-# Official Swagger authentication header
+
 api_key_header = APIKeyHeader(
     name="Authorization",
     scheme_name="TITAN_Bearer_Auth",
@@ -122,7 +124,7 @@ async def chat(
                 }
             )
 
-                if response.status_code >= 400:
+        if response.status_code >= 400:
             print("GEMINI ERROR STATUS:", response.status_code)
             print("GEMINI ERROR BODY:", response.text[:2000])
 
@@ -130,8 +132,8 @@ async def chat(
                 status_code=502,
                 detail="AI provider request failed"
             )
-        
-                data = response.json()
+
+        data = response.json()
 
         candidates = data.get("candidates") or []
 
