@@ -131,7 +131,7 @@ async def chat(
                 detail="AI provider request failed"
             )
         
-               data = response.json()
+                data = response.json()
 
         candidates = data.get("candidates") or []
 
