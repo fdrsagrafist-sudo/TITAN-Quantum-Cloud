@@ -122,16 +122,16 @@ async def chat(
                 }
             )
 
-        if response.status_code >= 400:
-    print("GEMINI ERROR STATUS:", response.status_code)
-    print("GEMINI ERROR BODY:", response.text[:2000])
+                if response.status_code >= 400:
+            print("GEMINI ERROR STATUS:", response.status_code)
+            print("GEMINI ERROR BODY:", response.text[:2000])
 
-    raise HTTPException(
-        status_code=502,
-        detail="AI provider request failed"
-    )
-
-        data = response.json()
+            raise HTTPException(
+                status_code=502,
+                detail="AI provider request failed"
+            )
+        
+               data = response.json()
 
         candidates = data.get("candidates") or []
 
