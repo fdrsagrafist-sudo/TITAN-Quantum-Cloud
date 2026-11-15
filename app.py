@@ -1,56 +1,167 @@
-import os, hmac, httpx
-from fastapi import FastAPI, Header, HTTPException
+import os
+import hmac
+import httpx
+
+from fastapi import FastAPI, Header, HTTPException, Depends
+from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
 
-app = FastAPI(title="TITAN Ω Cloud API", version="0.1.0")
+app = FastAPI(
+    title="TITAN Ω Cloud API",
+    version="0.2.0"
+)
+
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY", "")
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3-flash-preview")
 TITAN_API_TOKEN = os.getenv("TITAN_API_TOKEN", "")
 
+# Official Swagger authentication header
+api_key_header = APIKeyHeader(
+    name="Authorization",
+    scheme_name="TITAN_Bearer_Auth",
+    auto_error=False
+)
+
+
 class ChatRequest(BaseModel):
     message: str = Field(min_length=1, max_length=12000)
-    history: list[dict[str, str]] = Field(default_factory=list, max_length=30)
+    history: list[dict[str, str]] = Field(
+        default_factory=list,
+        max_length=30
+    )
+
 
 class ChatResponse(BaseModel):
     reply: str
     model: str
 
+
+@app.get("/")
+async def root():
+    return {
+        "service": "TITAN Ω Cloud API",
+        "status": "online",
+        "version": "0.2.0"
+    }
+
+
 @app.get("/health")
 async def health():
-    return {"status": "ok", "service": "TITAN Ω Cloud API"}
+    return {
+        "status": "ok",
+        "service": "TITAN Ω Cloud API"
+    }
 
-def authorize(header):
+
+def authorize(token: str | None):
     if not TITAN_API_TOKEN:
-        raise HTTPException(503, "Cloud gateway is not configured")
-    if not header or not hmac.compare_digest(header, f"Bearer {TITAN_API_TOKEN}"):
-        raise HTTPException(401, "Unauthorized")
+        raise HTTPException(
+            status_code=503,
+            detail="Cloud gateway is not configured"
+        )
+
+    expected = f"Bearer {TITAN_API_TOKEN}"
+
+    if not token or not hmac.compare_digest(token, expected):
+        raise HTTPException(
+            status_code=401,
+            detail="Unauthorized"
+        )
+
 
 @app.post("/v1/chat", response_model=ChatResponse)
-async def chat(body: ChatRequest, authorization: str | None = Header(default=None)):
+async def chat(
+    body: ChatRequest,
+    authorization: str | None = Depends(api_key_header)
+):
     authorize(authorization)
+
     if not GEMINI_API_KEY:
-        raise HTTPException(503, "AI provider key is not configured")
+        raise HTTPException(
+            status_code=503,
+            detail="AI provider key is not configured"
+        )
+
     contents = []
+
     for item in body.history[-20:]:
-        role, value = item.get("role"), item.get("text", "")
-        if role in ("user", "model") and isinstance(value, str) and value.strip():
-            contents.append({"role": role, "parts": [{"text": value[:12000]}]})
-    contents.append({"role": "user", "parts": [{"text": body.message}]})
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{GEMINI_MODEL}:generateContent"
+        role = item.get("role")
+        value = item.get("text", "")
+
+        if (
+            role in ("user", "model")
+            and isinstance(value, str)
+            and value.strip()
+        ):
+            contents.append({
+                "role": role,
+                "parts": [{"text": value[:12000]}]
+            })
+
+    contents.append({
+        "role": "user",
+        "parts": [{"text": body.message}]
+    })
+
+    url = (
+        "https://generativelanguage.googleapis.com/"
+        f"v1beta/models/{GEMINI_MODEL}:generateContent"
+    )
+
     try:
         async with httpx.AsyncClient(timeout=90) as client:
-            r = await client.post(url, params={"key": GEMINI_API_KEY},
-                json={"contents": contents, "generationConfig": {"temperature": 0.7, "maxOutputTokens": 4096}})
-        if r.status_code >= 400:
-            raise HTTPException(502, "AI provider request failed")
-        data = r.json()
+            response = await client.post(
+                url,
+                params={"key": GEMINI_API_KEY},
+                json={
+                    "contents": contents,
+                    "generationConfig": {
+                        "temperature": 0.7,
+                        "maxOutputTokens": 4096
+                    }
+                }
+            )
+
+        if response.status_code >= 400:
+            raise HTTPException(
+                status_code=502,
+                detail="AI provider request failed"
+            )
+
+        data = response.json()
+
         candidates = data.get("candidates") or []
-        parts = candidates[0].get("content", {}).get("parts", []) if candidates else []
-        reply = "\\n".join(p.get("text", "") for p in parts if isinstance(p, dict))
+
+        parts = (
+            candidates[0].get("content", {}).get("parts", [])
+            if candidates else []
+        )
+
+        reply = "\n".join(
+            part.get("text", "")
+            for part in parts
+            if isinstance(part, dict)
+        )
+
         if not reply.strip():
-            raise HTTPException(502, "AI provider returned an empty response")
-        return ChatResponse(reply=reply, model=GEMINI_MODEL)
+            raise HTTPException(
+                status_code=502,
+                detail="AI provider returned an empty response"
+            )
+
+        return ChatResponse(
+            reply=reply,
+            model=GEMINI_MODEL
+        )
+
     except httpx.TimeoutException:
-        raise HTTPException(504, "AI provider timed out")
+        raise HTTPException(
+            status_code=504,
+            detail="AI provider timed out"
+        )
+
     except httpx.HTTPError:
-        raise HTTPException(502, "Could not reach AI provider")
+        raise HTTPException(
+            status_code=502,
+            detail="Could not reach AI provider"
+        )
