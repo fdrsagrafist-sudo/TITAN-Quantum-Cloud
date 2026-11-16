@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 app = FastAPI(
     title="TITAN Ω Cloud API",
-    version="0.2.0"
+    version="0.3.0"
 )
 
 
@@ -38,23 +38,6 @@ class ChatResponse(BaseModel):
     model: str
 
 
-@app.get("/")
-async def root():
-    return {
-        "service": "TITAN Ω Cloud API",
-        "status": "online",
-        "version": "0.2.0"
-    }
-
-
-@app.get("/health")
-async def health():
-    return {
-        "status": "ok",
-        "service": "TITAN Ω Cloud API"
-    }
-
-
 def authorize(token: str | None):
     if not TITAN_API_TOKEN:
         raise HTTPException(
@@ -69,6 +52,98 @@ def authorize(token: str | None):
             status_code=401,
             detail="Unauthorized"
         )
+
+
+@app.get("/")
+async def root():
+    return {
+        "service": "TITAN Ω Cloud API",
+        "status": "online",
+        "version": "0.3.0"
+    }
+
+
+@app.get("/health")
+async def health():
+    return {
+        "status": "ok",
+        "service": "TITAN Ω Cloud API"
+    }
+
+
+@app.get("/v1/diagnostics")
+async def diagnostics(
+    authorization: str | None = Depends(api_key_header)
+):
+    authorize(authorization)
+
+    if not GEMINI_API_KEY:
+        return {
+            "status": "error",
+            "reason": "GEMINI_API_KEY is missing",
+            "model": GEMINI_MODEL
+        }
+
+    url = (
+        "https://generativelanguage.googleapis.com/"
+        f"v1beta/models/{GEMINI_MODEL}:generateContent"
+    )
+
+    try:
+        async with httpx.AsyncClient(timeout=30) as client:
+            response = await client.post(
+                url,
+                headers={
+                    "x-goog-api-key": GEMINI_API_KEY
+                },
+                json={
+                    "contents": [{
+                        "role": "user",
+                        "parts": [{"text": "Reply with OK"}]
+                    }]
+                }
+            )
+
+        if response.status_code != 200:
+            try:
+                error_data = response.json().get("error", {})
+                message = error_data.get(
+                    "message",
+                    "Unknown provider error"
+                )
+                reason = (
+                    error_data.get("details", [{}])[0]
+                    .get("reason", "Not provided")
+                )
+            except Exception:
+                message = "Unparseable provider response"
+                reason = "Unknown"
+
+            return {
+                "status": "failed",
+                "http_status": response.status_code,
+                "reason": reason,
+                "message": message,
+                "model": GEMINI_MODEL
+            }
+
+        return {
+            "status": "success",
+            "gemini_connected": True,
+            "model": GEMINI_MODEL
+        }
+
+    except httpx.TimeoutException:
+        return {
+            "status": "timeout",
+            "model": GEMINI_MODEL
+        }
+
+    except httpx.HTTPError:
+        return {
+            "status": "connection_error",
+            "model": GEMINI_MODEL
+        }
 
 
 @app.post("/v1/chat", response_model=ChatResponse)
@@ -114,7 +189,9 @@ async def chat(
         async with httpx.AsyncClient(timeout=90) as client:
             response = await client.post(
                 url,
-                headers={"x-goog-api-key": GEMINI_API_KEY},
+                headers={
+                    "x-goog-api-key": GEMINI_API_KEY
+                },
                 json={
                     "contents": contents,
                     "generationConfig": {
@@ -134,7 +211,6 @@ async def chat(
             )
 
         data = response.json()
-
         candidates = data.get("candidates") or []
 
         parts = (
